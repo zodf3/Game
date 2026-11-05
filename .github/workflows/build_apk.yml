@@ -35,8 +35,8 @@ jobs:
           # 1. Backup custom AndroidManifest.xml
           cp android/app/src/main/AndroidManifest.xml /tmp/AndroidManifest.xml || true
           
-          # 2. Generate standard Gradle wrapper and build files
-          flutter create . --platforms=android --org com.example
+          # 2. Generate standard Gradle wrapper with valid lowercase project name
+          flutter create . --platforms=android --project-name twenty_nine_card_game --org com.example
           
           # 3. Restore Bluetooth & Location permissions into AndroidManifest.xml
           cp /tmp/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
