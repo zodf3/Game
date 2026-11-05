@@ -28,15 +28,39 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: Configure Android Project
+        run: |
+          # If files are in twenty_nine_card_game subfolder, enter it
+          if [ -d "twenty_nine_card_game" ]; then
+            cd twenty_nine_card_game
+          fi
+          
+          # 1. Backup custom AndroidManifest.xml
+          cp android/app/src/main/AndroidManifest.xml /tmp/AndroidManifest.xml || true
+          
+          # 2. Generate all standard Gradle and wrapper files
+          flutter create . --platforms=android --org com.example
+          
+          # 3. Restore Bluetooth & Location permissions into AndroidManifest.xml
+          cp /tmp/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+          
+          # 4. Enforce minSdkVersion 21 for Bluetooth & Permission handler
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' android/app/build.gradle || true
+          sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/g' android/app/build.gradle || true
+
       - name: Get Dependencies
-        run: flutter pub get
+        run: |
+          if [ -d "twenty_nine_card_game" ]; then cd twenty_nine_card_game; fi
+          flutter pub get
 
       - name: Build Android Release APK
-        run: flutter build apk --release
+        run: |
+          if [ -d "twenty_nine_card_game" ]; then cd twenty_nine_card_game; fi
+          flutter build apk --release
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: TwentyNine-Release-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: '**/build/app/outputs/flutter-apk/app-release.apk'
           if-no-files-found: error

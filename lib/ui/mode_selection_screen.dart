@@ -346,7 +346,7 @@ class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
   }
 
   void _showHostDialog() {
-    _bluetooth.startHostServer();
+    _bluetooth.startHostServer(hostName: widget.userName);
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -367,19 +367,19 @@ class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
                   const SizedBox(height: 8),
                   Text(
                     peerCount >= 1
-                        ? 'Seat 1: ${_bluetooth.connectedPeers[0].device.name ?? "Friend 1"} (Connected)'
+                        ? 'Seat 1: ${_bluetooth.connectedPeers[0].name} (Connected)'
                         : 'Seat 1: vut (Bot)',
                     style: TextStyle(color: peerCount >= 1 ? Colors.greenAccent : Colors.white60, fontSize: 13),
                   ),
                   Text(
                     peerCount >= 2
-                        ? 'Seat 2: ${_bluetooth.connectedPeers[1].device.name ?? "Friend 2"} (Connected)'
+                        ? 'Seat 2: ${_bluetooth.connectedPeers[1].name} (Connected)'
                         : 'Seat 2: dada (Partner Bot)',
                     style: TextStyle(color: peerCount >= 2 ? Colors.greenAccent : Colors.white60, fontSize: 13),
                   ),
                   Text(
                     peerCount >= 3
-                        ? 'Seat 3: ${_bluetooth.connectedPeers[2].device.name ?? "Friend 3"} (Connected)'
+                        ? 'Seat 3: ${_bluetooth.connectedPeers[2].name} (Connected)'
                         : 'Seat 3: kukur (Bot)',
                     style: TextStyle(color: peerCount >= 3 ? Colors.greenAccent : Colors.white60, fontSize: 13),
                   ),
@@ -404,7 +404,7 @@ class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
                     Navigator.of(ctx).pop();
                     final controller = GameController(userName: widget.userName);
                     for (int i = 0; i < peerCount; i++) {
-                      controller.players[i + 1].name = _bluetooth.connectedPeers[i].device.name ?? 'Friend ${i + 1}';
+                      controller.players[i + 1].name = _bluetooth.connectedPeers[i].name;
                       controller.players[i + 1].isBot = false;
                     }
                     Navigator.of(context).push(
@@ -422,13 +422,15 @@ class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
   }
 
   void _showJoinDialog() {
-    _bluetooth.refreshPairedDevices();
+    _bluetooth.startDiscovery(userName: widget.userName);
     showDialog(
       context: context,
       builder: (ctx) {
         return ListenableBuilder(
           listenable: _bluetooth,
           builder: (context, _) {
+            final hostEntries = _bluetooth.discoveredHosts.entries.toList();
+
             return AlertDialog(
               backgroundColor: const Color(0xFF1E293B),
               title: const Text('Join Bluetooth Table', style: TextStyle(color: Colors.white)),
@@ -438,25 +440,31 @@ class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const Text(
-                      'Select your friend\'s paired device to join their table:',
+                      'Select your friend\'s nearby table to join:',
                       style: TextStyle(color: Colors.white70, fontSize: 13),
                     ),
                     const SizedBox(height: 12),
-                    if (_bluetooth.pairedDevices.isEmpty)
-                      const Text(
-                        'No paired Bluetooth devices found.\nPlease pair your friend\'s phone in Android Settings first.',
-                        style: TextStyle(color: Colors.orangeAccent, fontSize: 12),
-                        textAlign: TextAlign.center,
+                    if (hostEntries.isEmpty)
+                      const Column(
+                        children: [
+                          CircularProgressIndicator(color: Color(0xFF3B82F6)),
+                          SizedBox(height: 12),
+                          Text(
+                            'Scanning for nearby friends hosting 29 tables...',
+                            style: TextStyle(color: Colors.orangeAccent, fontSize: 12),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
                       )
                     else
-                      ..._bluetooth.pairedDevices.map((d) {
+                      ...hostEntries.map((e) {
                         return ListTile(
                           leading: const Icon(Icons.bluetooth, color: Colors.blueAccent),
-                          title: Text(d.name ?? 'Device', style: const TextStyle(color: Colors.white)),
-                          subtitle: Text(d.address, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                          title: Text(e.value, style: const TextStyle(color: Colors.white)),
+                          subtitle: Text('Endpoint: ${e.key}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
                           onTap: () async {
-                            final success = await _bluetooth.connectToHost(d);
-                            if (success && mounted) {
+                            await _bluetooth.connectToHost(e.key, widget.userName);
+                            if (mounted) {
                               Navigator.of(ctx).pop();
                               final controller = GameController(userName: widget.userName);
                               Navigator.of(context).push(
@@ -471,7 +479,10 @@ class _ModeSelectionScreenState extends State<ModeSelectionScreen> {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
+                  onPressed: () {
+                    _bluetooth.disposeBluetooth();
+                    Navigator.of(ctx).pop();
+                  },
                   child: const Text('CLOSE', style: TextStyle(color: Color(0xFFF59E0B))),
                 ),
               ],

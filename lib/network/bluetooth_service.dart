@@ -1,201 +1,177 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+import 'package:nearby_connections/nearby_connections.dart';
 import 'protocol.dart';
 
 typedef OnMessageReceived = void Function(NetworkMessage message, int senderId);
 
-class BluetoothPeer {
-  final BluetoothDevice device;
-  BluetoothConnection? connection;
-  int assignedSeat;
+class ConnectedFriend {
+  final String endpointId;
+  final String name;
+  final int assignedSeat;
 
-  BluetoothPeer({
-    required this.device,
-    this.connection,
+  ConnectedFriend({
+    required this.endpointId,
+    required this.name,
     required this.assignedSeat,
   });
 }
 
 class BluetoothManager extends ChangeNotifier {
-  static const String appServiceUuid = "00001101-0000-1000-8000-00805F9B34FB"; // Standard SPP UUID
+  static const Strategy strategy = Strategy.P2P_STAR; // 1 Host + up to 3 peers
 
-  final FlutterBluetoothSerial _bluetooth = FlutterBluetoothSerial.instance;
-
-  bool isBluetoothEnabled = false;
+  bool isAdvertising = false;
   bool isDiscovering = false;
   bool isHost = false;
   bool isConnected = false;
   int localSeatIndex = 0; // 0 = Host (South)
 
-  List<BluetoothDevice> pairedDevices = [];
-  List<BluetoothDiscoveryResult> discoveredDevices = [];
-  final List<BluetoothPeer> connectedPeers = [];
+  final List<ConnectedFriend> connectedPeers = [];
+  final Map<String, String> discoveredHosts = {}; // endpointId -> name
 
   OnMessageReceived? onMessageReceived;
-  StreamSubscription<BluetoothDiscoveryResult>? _discoveryStreamSubscription;
 
-  BluetoothManager() {
-    _initBluetooth();
-  }
-
-  Future<void> _initBluetooth() async {
+  // --- HOST ROLE ---
+  Future<bool> startHostServer({String hostName = 'Host'}) async {
     try {
-      isBluetoothEnabled = (await _bluetooth.isEnabled) ?? false;
-      if (isBluetoothEnabled) {
-        refreshPairedDevices();
-      }
-      _bluetooth.onStateChanged().listen((BluetoothState state) {
-        isBluetoothEnabled = state.isEnabled;
-        notifyListeners();
-      });
-    } catch (e) {
-      debugPrint("Bluetooth initialization error: $e");
-    }
-  }
-
-  Future<void> refreshPairedDevices() async {
-    try {
-      pairedDevices = await _bluetooth.getBondedDevices();
-      notifyListeners();
-    } catch (e) {
-      debugPrint("Error fetching paired devices: $e");
-    }
-  }
-
-  void startDiscovery() {
-    discoveredDevices.clear();
-    isDiscovering = true;
-    notifyListeners();
-
-    _discoveryStreamSubscription = _bluetooth.startDiscovery().listen((r) {
-      final existingIndex = discoveredDevices.indexWhere((element) => element.device.address == r.device.address);
-      if (existingIndex >= 0) {
-        discoveredDevices[existingIndex] = r;
-      } else {
-        discoveredDevices.add(r);
-      }
-      notifyListeners();
-    });
-
-    _discoveryStreamSubscription?.onDone(() {
-      isDiscovering = false;
-      notifyListeners();
-    });
-  }
-
-  void stopDiscovery() {
-    _discoveryStreamSubscription?.cancel();
-    isDiscovering = false;
-    notifyListeners();
-  }
-
-  // --- HOST SERVER ROLE ---
-  Future<void> startHostServer() async {
-    isHost = true;
-    localSeatIndex = 0; // Host is seat 0 (South)
-    connectedPeers.clear();
-    notifyListeners();
-
-    // Listen on Bluetooth RFCOMM socket for peers to connect
-    // Any remaining unfilled seats out of 4 will be filled by AI Bots automatically!
-    debugPrint("Host server started. Waiting for friends to connect over Bluetooth...");
-  }
-
-  void registerPeerConnection(BluetoothDevice device, BluetoothConnection connection) {
-    if (connectedPeers.length >= 3) {
-      debugPrint("Table is full (maximum 4 players)!");
-      connection.close();
-      return;
-    }
-
-    final seat = connectedPeers.length + 1; // Seats 1, 2, 3
-    final peer = BluetoothPeer(device: device, connection: connection, assignedSeat: seat);
-    connectedPeers.add(peer);
-    notifyListeners();
-
-    // Send assigned seat to connected friend
-    sendMessageToPeer(
-      peer,
-      NetworkMessage(type: MessageType.seatAssignment, payload: {'seatIndex': seat}),
-    );
-
-    // Listen to incoming messages from this friend
-    connection.input?.listen((Uint8List data) {
-      final text = utf8.decode(data);
-      try {
-        final json = jsonDecode(text) as Map<String, dynamic>;
-        final message = NetworkMessage.fromJson(json);
-        onMessageReceived?.call(message, peer.assignedSeat);
-      } catch (e) {
-        debugPrint("Error parsing Bluetooth message: $e");
-      }
-    }).onDone(() {
-      debugPrint("Peer ${peer.device.name} disconnected. Converting to Bot.");
-      connectedPeers.remove(peer);
-      notifyListeners();
-    });
-  }
-
-  // --- CLIENT ROLE ---
-  Future<bool> connectToHost(BluetoothDevice hostDevice) async {
-    try {
-      isHost = false;
-      stopDiscovery();
-
-      final connection = await BluetoothConnection.toAddress(hostDevice.address);
-      isConnected = true;
+      isHost = true;
+      localSeatIndex = 0;
+      connectedPeers.clear();
+      isAdvertising = true;
       notifyListeners();
 
-      connection.input?.listen((Uint8List data) {
-        final text = utf8.decode(data);
-        try {
-          final json = jsonDecode(text) as Map<String, dynamic>;
-          final message = NetworkMessage.fromJson(json);
-
-          if (message.type == MessageType.seatAssignment) {
-            localSeatIndex = message.payload['seatIndex'] as int;
+      await Nearby().startAdvertising(
+        hostName,
+        strategy,
+        onConnectionInitiated: (String id, ConnectionInfo info) {
+          Nearby().acceptConnection(
+            id,
+            onPayLoadRecieved: (endid, payload) => _handleIncomingPayload(endid, payload),
+          );
+        },
+        onConnectionResult: (String id, Status status) {
+          if (status == Status.CONNECTED) {
+            final seat = connectedPeers.length + 1;
+            final friend = ConnectedFriend(endpointId: id, name: 'Friend $seat', assignedSeat: seat);
+            connectedPeers.add(friend);
             notifyListeners();
+
+            // Send seat assignment to connected friend
+            sendMessageToPeer(
+              friend,
+              NetworkMessage(type: MessageType.seatAssignment, payload: {'seatIndex': seat}),
+            );
           }
-
-          onMessageReceived?.call(message, 0); // Sender is host (0)
-        } catch (e) {
-          debugPrint("Error parsing Bluetooth message from host: $e");
-        }
-      }).onDone(() {
-        isConnected = false;
-        notifyListeners();
-      });
-
+        },
+        onDisconnected: (String id) {
+          connectedPeers.removeWhere((p) => p.endpointId == id);
+          notifyListeners();
+        },
+      );
       return true;
     } catch (e) {
-      debugPrint("Failed to connect to host: $e");
-      isConnected = false;
-      notifyListeners();
+      debugPrint("Host start error: $e");
       return false;
     }
   }
 
-  // --- BROADCAST / SEND MESSAGES ---
-  void broadcastMessage(NetworkMessage message) {
-    final raw = utf8.encode(jsonEncode(message.toJson()));
-    for (final peer in connectedPeers) {
-      peer.connection?.output.add(raw);
+  // --- CLIENT ROLE ---
+  Future<bool> startDiscovery({String userName = 'Player'}) async {
+    try {
+      isHost = false;
+      discoveredHosts.clear();
+      isDiscovering = true;
+      notifyListeners();
+
+      await Nearby().startDiscovery(
+        userName,
+        strategy,
+        onEndpointFound: (String id, String name, String serviceId) {
+          discoveredHosts[id] = name;
+          notifyListeners();
+        },
+        onEndpointLost: (String? id) {
+          if (id != null) {
+            discoveredHosts.remove(id);
+            notifyListeners();
+          }
+        },
+      );
+      return true;
+    } catch (e) {
+      debugPrint("Discovery error: $e");
+      return false;
     }
   }
 
-  void sendMessageToPeer(BluetoothPeer peer, NetworkMessage message) {
-    final raw = utf8.encode(jsonEncode(message.toJson()));
-    peer.connection?.output.add(raw);
+  Future<void> connectToHost(String endpointId, String userName) async {
+    try {
+      await Nearby().requestConnection(
+        userName,
+        endpointId,
+        onConnectionInitiated: (id, info) {
+          Nearby().acceptConnection(
+            id,
+            onPayLoadRecieved: (endid, payload) => _handleIncomingPayload(endid, payload),
+          );
+        },
+        onConnectionResult: (id, status) {
+          if (status == Status.CONNECTED) {
+            isConnected = true;
+            notifyListeners();
+          }
+        },
+        onDisconnected: (id) {
+          isConnected = false;
+          notifyListeners();
+        },
+      );
+    } catch (e) {
+      debugPrint("Connect error: $e");
+    }
+  }
+
+  void _handleIncomingPayload(String endid, Payload payload) {
+    if (payload.type == PayloadType.BYTES && payload.bytes != null) {
+      final text = utf8.decode(payload.bytes!);
+      try {
+        final json = jsonDecode(text) as Map<String, dynamic>;
+        final message = NetworkMessage.fromJson(json);
+
+        if (message.type == MessageType.seatAssignment) {
+          localSeatIndex = message.payload['seatIndex'] as int;
+          notifyListeners();
+        }
+
+        final senderPeer = connectedPeers.firstWhere(
+          (p) => p.endpointId == endid,
+          orElse: () => ConnectedFriend(endpointId: endid, name: 'Peer', assignedSeat: 0),
+        );
+        onMessageReceived?.call(message, senderPeer.assignedSeat);
+      } catch (e) {
+        debugPrint("Error parsing incoming message: $e");
+      }
+    }
+  }
+
+  void broadcastMessage(NetworkMessage message) {
+    final raw = Uint8List.fromList(utf8.encode(jsonEncode(message.toJson())));
+    for (final peer in connectedPeers) {
+      Nearby().sendBytesPayload(peer.endpointId, raw);
+    }
+  }
+
+  void sendMessageToPeer(ConnectedFriend peer, NetworkMessage message) {
+    final raw = Uint8List.fromList(utf8.encode(jsonEncode(message.toJson())));
+    Nearby().sendBytesPayload(peer.endpointId, raw);
   }
 
   void disposeBluetooth() {
-    stopDiscovery();
-    for (final peer in connectedPeers) {
-      peer.connection?.close();
-    }
+    Nearby().stopAdvertising();
+    Nearby().stopDiscovery();
+    Nearby().stopAllEndpoints();
     connectedPeers.clear();
+    discoveredHosts.clear();
   }
 }
