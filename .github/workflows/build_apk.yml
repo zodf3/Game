@@ -35,7 +35,7 @@ jobs:
           # 1. Backup custom AndroidManifest.xml
           cp android/app/src/main/AndroidManifest.xml /tmp/AndroidManifest.xml || true
           
-          # 2. Generate standard Gradle wrapper with valid lowercase project name
+          # 2. Generate standard Gradle wrapper with explicit project name
           flutter create . --platforms=android --project-name twenty_nine_card_game --org com.example
           
           # 3. Restore Bluetooth & Location permissions into AndroidManifest.xml
@@ -44,6 +44,10 @@ jobs:
           # 4. Enforce minSdkVersion 21
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' android/app/build.gradle || true
           sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/g' android/app/build.gradle || true
+
+          # 5. Upgrade Kotlin to 1.9.22 in settings.gradle and build.gradle
+          sed -i 's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "1.9.22"/g' android/settings.gradle || true
+          sed -i "s/ext.kotlin_version = '[^']*'/ext.kotlin_version = '1.9.22'/g" android/build.gradle || true
 
       - name: Get Dependencies
         run: |
