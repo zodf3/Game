@@ -1,0 +1,22 @@
+{
+  "name": "29 Card Game - Reverse & Bots",
+  "short_name": "29 Cards",
+  "start_url": "play_twenty_nine.html",
+  "display": "standalone",
+  "background_color": "#0a1118",
+  "theme_color": "#075e3c",
+  "orientation": "landscape-primary",
+  "description": "Authentic South Asian 29 Card Game with Reverse Game, Bluetooth Multiplayer and Bots (vut, kukur, dada)",
+  "icons": [
+    {
+      "src": "https://img.icons8.com/color/192/spades.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://img.icons8.com/color/512/spades.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
