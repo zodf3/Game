@@ -6,11 +6,11 @@ enum PlayerPosition {
   north(2, 'dada', 0),
   west(3, 'kukur', 1);
 
-  final int index;
+  final int seatNumber;
   final String defaultName;
   final int team; // 0 for South-North, 1 for East-West
 
-  const PlayerPosition(this.index, this.defaultName, this.team);
+  const PlayerPosition(this.seatNumber, this.defaultName, this.team);
 }
 
 class Player {
